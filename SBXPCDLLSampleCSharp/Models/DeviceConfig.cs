@@ -35,5 +35,13 @@ namespace BiometricAttendanceBridge.Models
         public string CommandReference { get; set; } // <-- Unique ref from server
         public DateTime CreatedAt { get; set; }
     }
+    // Simple class to hold user data
+    public class BiometricUser
+    {
+        public string EnrollNo { get; set; }
+        public string Name { get; set; }
+        public int Privilege { get; set; }
+        public int EnabledStatus { get; set; }
+    }
 
 }

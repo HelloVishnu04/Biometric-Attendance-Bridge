@@ -1,13 +1,14 @@
-﻿using System;
+﻿using BiometricAttendanceBridge.Models;
+using BiometricAttendanceBridge.Services;
+using Microsoft.Win32;
+using sbxpc;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using sbxpc;
-using BiometricAttendanceBridge.Models;
-using BiometricAttendanceBridge.Services;
-using Microsoft.Win32;
 
 namespace BiometricAttendanceBridge
 {
@@ -36,6 +37,12 @@ namespace BiometricAttendanceBridge
         private int selectedMachineNumber = -1;
         private bool isSyncing = false, isDeviceConnected = false, isApiConnected = false;
         private List<AttendanceLog> logHistory = new List<AttendanceLog>();
+        // Track communication events (both fetches and pushes)
+        private List<string> communicationHistory = new List<string>();
+        // Pagination state for User Management
+        private List<BiometricUser> allUsers = new List<BiometricUser>();
+        private int currentUserPage = 1;
+        private const int USERS_PER_PAGE = 25;
 
         public MainForm()
         {
@@ -60,7 +67,7 @@ namespace BiometricAttendanceBridge
         {
             this.Text = "Biometric Data Manager";
             this.Width = 950;
-            this.Height = 650;
+            this.Height = 600;
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.White;
 
@@ -102,7 +109,7 @@ namespace BiometricAttendanceBridge
             statusStrip = new StatusStrip();
             lblApiStatus = new ToolStripStatusLabel("API: Not Authenticated");
             lblLastSync = new ToolStripStatusLabel("Last Sync: Never");
-            lblFooter = new ToolStripStatusLabel("Developed by Krishna Kumar with the help of Gemini Pro");
+            lblFooter = new ToolStripStatusLabel("Developed by Krishna Kumar.");
             var springLabel = new ToolStripStatusLabel { Spring = true };
             statusStrip.Items.AddRange(new ToolStripItem[] { lblApiStatus, new ToolStripSeparator(), lblLastSync, springLabel, lblFooter });
             this.Controls.Add(statusStrip);
@@ -110,13 +117,13 @@ namespace BiometricAttendanceBridge
 
         private void CreateDashboardTab()
         {
-            GroupBox gbDeviceMgmt = new GroupBox() { Text = "Device Management", Location = new Point(10, 10), Size = new Size(380, 280) };
+            GroupBox gbDeviceMgmt = new GroupBox() { Text = "Device Management", Location = new Point(10, 10), Size = new Size(380, 320) };
             tabDashboard.Controls.Add(gbDeviceMgmt);
 
             lvDevices = new ListView()
             {
                 Location = new Point(12, 24),
-                Size = new Size(356, 140),
+                Size = new Size(356, 230),
                 View = View.Details,
                 FullRowSelect = true,
                 MultiSelect = false,
@@ -127,20 +134,20 @@ namespace BiometricAttendanceBridge
             lvDevices.SelectedIndexChanged += (s, e) => UpdateDeviceStatusUI();
             gbDeviceMgmt.Controls.Add(lvDevices);
 
-            btnAdd = new Button() { Text = "Add", Location = new Point(12, 175), Size = new Size(100, 32) };
+            btnAdd = new Button() { Text = "Add", Location = new Point(12, 270), Size = new Size(100, 32) };
             btnAdd.Click += BtnAddDevice_Click;
             gbDeviceMgmt.Controls.Add(btnAdd);
-            btnEdit = new Button() { Text = "Edit", Location = new Point(135, 175), Size = new Size(100, 32) };
+            btnEdit = new Button() { Text = "Edit", Location = new Point(135, 270), Size = new Size(100, 32) };
             btnEdit.Click += BtnEditDevice_Click;
             gbDeviceMgmt.Controls.Add(btnEdit);
-            btnRemove = new Button() { Text = "Remove", Location = new Point(258, 175), Size = new Size(110, 32) };
+            btnRemove = new Button() { Text = "Remove", Location = new Point(258, 270), Size = new Size(110, 32) };
             btnRemove.Click += BtnRemoveDevice_Click;
             gbDeviceMgmt.Controls.Add(btnRemove);
 
             btnSyncAll = new Button()
             {
                 Text = "Sync All Now",
-                Location = new Point(10, 300),
+                Location = new Point(10, 350),
                 Size = new Size(380, 40),
                 Font = new Font(this.Font, FontStyle.Bold),
                 BackColor = Color.LimeGreen,
@@ -152,7 +159,7 @@ namespace BiometricAttendanceBridge
             btnViewCommLog = new Button()
             {
                 Text = "View Communication Log",
-                Location = new Point(10, 350),
+                Location = new Point(10, 400),
                 Size = new Size(380, 35),
                 Font = new Font(this.Font, FontStyle.Regular)
             };
@@ -162,14 +169,14 @@ namespace BiometricAttendanceBridge
             btnViewQueue = new Button()
             {
                 Text = "View Pending Queue",
-                Location = new Point(10, 395),
+                Location = new Point(10, 445),
                 Size = new Size(380, 35),
                 Font = new Font(this.Font, FontStyle.Regular)
             };
             btnViewQueue.Click += (s, e) => ShowPendingQueue();
             tabDashboard.Controls.Add(btnViewQueue);
 
-            GroupBox gbStatus = new GroupBox() { Text = "Connection Status", Location = new Point(400, 10), Size = new Size(520, 130) };
+            GroupBox gbStatus = new GroupBox() { Text = "Connection Status", Location = new Point(400, 10), Size = new Size(520, 150) };
             tabDashboard.Controls.Add(gbStatus);
 
             lblSelectedDevice = new Label() { Text = "DEVICE: Not Selected", Font = new Font(this.Font, FontStyle.Bold), Location = new Point(15, 28), AutoSize = true };
@@ -198,13 +205,13 @@ namespace BiometricAttendanceBridge
             btnApiConnect.Click += BtnApiConnect_Click;
             gbStatus.Controls.Add(btnApiConnect);
 
-            GroupBox gbLog = new GroupBox() { Text = "Activity Log", Location = new Point(400, 150), Size = new Size(520, 280) };
+            GroupBox gbLog = new GroupBox() { Text = "Activity Log", Location = new Point(400, 180), Size = new Size(520, 300) };
             tabDashboard.Controls.Add(gbLog);
 
             rtbLog = new RichTextBox()
             {
                 Location = new Point(12, 24),
-                Size = new Size(496, 244),
+                Size = new Size(496, 265),
                 ReadOnly = true,
                 Font = new Font("Consolas", 9),
                 ScrollBars = RichTextBoxScrollBars.Vertical,
@@ -225,10 +232,22 @@ namespace BiometricAttendanceBridge
             };
             tabUserMgmt.Controls.Add(lblTitle);
 
+            // Info label showing current page and total users
+            Label lblPageInfo = new Label()
+            {
+                Text = "Page 1 | Total Users: 0",
+                Location = new Point(0, 35),
+                AutoSize = true,
+                Font = new Font(this.Font, FontStyle.Regular),
+                ForeColor = Color.Blue,
+                Name = "lblPageInfo"
+            };
+            tabUserMgmt.Controls.Add(lblPageInfo);
+
             lvUsers = new ListView()
             {
-                Location = new Point(0, 40),
-                Size = new Size(570, 320),
+                Location = new Point(0, 60),
+                Size = new Size(570, 280),
                 View = View.Details,
                 FullRowSelect = true,
                 BorderStyle = BorderStyle.FixedSingle
@@ -239,26 +258,144 @@ namespace BiometricAttendanceBridge
             lvUsers.Columns.Add("Status", 90);
             tabUserMgmt.Controls.Add(lvUsers);
 
+            // Pagination buttons panel
+            Panel pnlPagination = new Panel()
+            {
+                Location = new Point(0, 350),
+                Size = new Size(570, 40),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            tabUserMgmt.Controls.Add(pnlPagination);
+
+            Button btnPrevPage = new Button()
+            {
+                Text = "< Previous",
+                Location = new Point(5, 5),
+                Size = new Size(80, 30)
+            };
+            btnPrevPage.Click += (s, e) =>
+            {
+                if (currentUserPage > 1)
+                {
+                    currentUserPage--;
+                    DisplayUserPage();
+                }
+            };
+            pnlPagination.Controls.Add(btnPrevPage);
+
+            Label lblPageNav = new Label()
+            {
+                Text = $"Page {currentUserPage}",
+                Location = new Point(200, 10),
+                AutoSize = true,
+                Font = new Font(this.Font, FontStyle.Bold),
+                Name = "lblPageNav"
+            };
+            pnlPagination.Controls.Add(lblPageNav);
+
+            Button btnNextPage = new Button()
+            {
+                Text = "Next >",
+                Location = new Point(485, 5),
+                Size = new Size(80, 30)
+            };
+            btnNextPage.Click += (s, e) =>
+            {
+                int totalPages = (int)Math.Ceiling((double)allUsers.Count / USERS_PER_PAGE);
+                if (currentUserPage < totalPages)
+                {
+                    currentUserPage++;
+                    DisplayUserPage();
+                }
+            };
+            pnlPagination.Controls.Add(btnNextPage);
+
             btnRefreshUsers = new Button()
             {
                 Text = "Refresh Users",
-                Location = new Point(0, 370),
+                Location = new Point(0, 395),
                 Size = new Size(125, 32)
             };
-            btnRefreshUsers.Click += (s, e) => RefreshUserListFromDevice(selectedMachineNumber, lvUsers);
+            btnRefreshUsers.Click += (s, e) =>
+            {
+                currentUserPage = 1; // Reset to page 1
+                RefreshUserListFromDevice(selectedMachineNumber, lvUsers);
+            };
             tabUserMgmt.Controls.Add(btnRefreshUsers);
         }
-        private void RefreshUserListFromDevice(int machineNumber, ListView lvUsers)
+
+        // Display current page of users
+        private void DisplayUserPage()
         {
             lvUsers.Items.Clear();
-            if (machineNumber <= 0) return;
+
+            if (allUsers.Count == 0)
+            {
+                lvUsers.Items.Add(new ListViewItem(new[] { "No users found", "", "", "" }));
+                return;
+            }
+
+            int totalPages = (int)Math.Ceiling((double)allUsers.Count / USERS_PER_PAGE);
+            int startIndex = (currentUserPage - 1) * USERS_PER_PAGE;
+            int endIndex = Math.Min(startIndex + USERS_PER_PAGE, allUsers.Count);
+
+            for (int i = startIndex; i < endIndex; i++)
+            {
+                var user = allUsers[i];
+                lvUsers.Items.Add(new ListViewItem(new[]
+                {
+                    user.EnrollNo,
+                    user.Name,
+                    user.Privilege.ToString(),
+                    user.EnabledStatus == 1 ? "Enabled" : "Disabled"
+                }));
+            }
+
+            // Update page info
+            var lblPageInfo = tabUserMgmt.Controls["lblPageInfo"] as Label;
+            if (lblPageInfo != null)
+            {
+                lblPageInfo.Text = $"Page {currentUserPage} of {totalPages} | Total Users: {allUsers.Count} | Showing {endIndex - startIndex} users";
+            }
+
+            // Update page navigation
+            foreach (Control ctrl in tabUserMgmt.Controls)
+            {
+                if (ctrl is Panel pnl)
+                {
+                    foreach (Control c in pnl.Controls)
+                    {
+                        if (c is Label && c.Name == "lblPageNav")
+                        {
+                            c.Text = $"Page {currentUserPage} / {totalPages}";
+                        }
+                    }
+                }
+            }
+
+            Log("SYSTEM", $"Displaying users: Page {currentUserPage} of {totalPages} ({endIndex - startIndex} users shown)");
+        }
+
+        private void RefreshUserListFromDevice(int machineNumber, ListView lvUsers)
+        {
+            allUsers.Clear();
+            currentUserPage = 1;
+
+            if (machineNumber <= 0)
+            {
+                MessageBox.Show("Please select a device first.");
+                return;
+            }
 
             try
             {
+                Log("DEVICE", "Fetching user list from device...");
+
                 if (SBXPCDLL.ReadAllUserID(machineNumber))
                 {
                     string enrollNo, name;
                     int dwEnrollNumber, dwEMachineNumber, dwBackupNumber, dwMachinePrivilege, dwEnable;
+
                     while (SBXPCDLL.GetAllUserID(
                         machineNumber,
                         out enrollNo,
@@ -269,19 +406,28 @@ namespace BiometricAttendanceBridge
                         out dwMachinePrivilege,
                         out dwEnable))
                     {
-                        lvUsers.Items.Add(new ListViewItem(new[]
+                        allUsers.Add(new BiometricUser
                         {
-                    enrollNo,           // String
-                    name,               // String
-                    dwMachinePrivilege.ToString(),
-                    dwEnable == 1 ? "Enabled" : "Disabled"
-                }));
+                            EnrollNo = enrollNo,
+                            Name = name,
+                            Privilege = dwMachinePrivilege,
+                            EnabledStatus = dwEnable
+                        });
                     }
+
+                    Log("DEVICE", $"Successfully fetched {allUsers.Count} users from device.", false, Color.Green);
+                    DisplayUserPage();
+                }
+                else
+                {
+                    Log("DEVICE", "Failed to read user list from device.", true, Color.Red);
+                    MessageBox.Show("Unable to fetch user list from device.");
                 }
             }
             catch (Exception ex)
             {
                 Log("ERROR", $"Unable to fetch users: {ex.Message}", true, Color.Red);
+                MessageBox.Show($"Error: {ex.Message}");
             }
         }
 
@@ -292,26 +438,27 @@ namespace BiometricAttendanceBridge
             {
                 Text = "Application Settings",
                 Font = new Font(this.Font.FontFamily, 16, FontStyle.Bold),
-                Location = new Point(0, 0),
+                Location = new Point(10, 10),
                 AutoSize = true
             };
             tabSettings.Controls.Add(lblTitle);
 
-            Label lblApiUrl = new Label() { Text = "API URL:", Location = new Point(0, 40), AutoSize = true };
+            Label lblApiUrl = new Label() { Text = "API URL:", Location = new Point(10, 50), AutoSize = true };
             tabSettings.Controls.Add(lblApiUrl);
 
             txtApiUrl = new TextBox()
             {
                 Text = configManager.Config.ApiBaseUrl ?? "https://domain.in/admin/attendance/webhook",
-                Location = new Point(100, 40),
-                Width = 370
+                Location = new Point(170, 50),
+                Width = 600,
+                AutoSize = true,
             };
             tabSettings.Controls.Add(txtApiUrl);
 
             Label lblAccessToken = new Label()
             {
                 Text = "Permanent Access Token:",
-                Location = new Point(0, 80),
+                Location = new Point(10, 80),
                 AutoSize = true
             };
             tabSettings.Controls.Add(lblAccessToken);
@@ -320,14 +467,15 @@ namespace BiometricAttendanceBridge
             {
                 Text = configManager.Config.AccessToken ?? "",
                 Location = new Point(170, 80),
-                Width = 300
+                Width = 600,
+                AutoSize = true,
             };
             tabSettings.Controls.Add(txtAccessToken);
 
             chkAutoStart = new CheckBox()
             {
                 Text = "Start application at login",
-                Location = new Point(0, 120),
+                Location = new Point(10, 120),
                 Checked = configManager.Config.AutoStart
             };
             tabSettings.Controls.Add(chkAutoStart);
@@ -335,7 +483,7 @@ namespace BiometricAttendanceBridge
             Button btnSaveSettings = new Button()
             {
                 Text = "Save Settings",
-                Location = new Point(0, 170),
+                Location = new Point(10, 170),
                 Size = new Size(120, 40),
                 Font = new Font(this.Font, FontStyle.Bold)
             };
@@ -612,6 +760,13 @@ namespace BiometricAttendanceBridge
             }
         }
 
+        // Log communication event
+        private void LogCommunicationEvent(string eventType, string details)
+        {
+            communicationHistory.Add($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{eventType}] {details}");
+        }
+
+        // Updated FetchAttendanceLogsAsync to log communication
         private async Task FetchAttendanceLogsAsync(DeviceConfig device)
         {
             try
@@ -619,21 +774,34 @@ namespace BiometricAttendanceBridge
                 Log("DEVICE", "Fetching attendance logs...");
                 var logs = await deviceManager.FetchLogsAsync(device.MachineNumber);
                 logHistory.AddRange(logs);
+
+                if (logs.Count > 0)
+                {
+                    LogCommunicationEvent("DEVICE_FETCH", $"Fetched {logs.Count} records from {device.Name}");
+                }
+
                 Log("DEVICE", $"Retrieved {logs.Count} attendance records.", false, Color.Green);
 
                 if (isApiConnected && logs.Count > 0)
                 {
-                    await apiService.PushLogsAsync(logs);
+                    bool pushed = await apiService.PushLogsAsync(logs);
+                    if (pushed)
+                    {
+                        LogCommunicationEvent("SERVER_PUSH", $"Pushed {logs.Count} records to server");
+                        Log("API", $"Successfully pushed {logs.Count} logs to server.", false, Color.Green);
+                    }
                 }
                 else if (logs.Count > 0)
                 {
                     localStorage.SaveLogs(logs);
+                    LogCommunicationEvent("OFFLINE_QUEUE", $"Queued {logs.Count} records (server unreachable)");
                     Log("LOCAL", $"Saved {logs.Count} logs to offline queue.");
                 }
             }
             catch (Exception ex)
             {
                 Log("ERROR", $"Fetch logs error: {ex.Message}", true, Color.Red);
+                LogCommunicationEvent("ERROR", $"Fetch error: {ex.Message}");
             }
         }
 
@@ -647,38 +815,60 @@ namespace BiometricAttendanceBridge
         {
             try
             {
-                // Check if token is configured
+                // Validate token is set
                 if (string.IsNullOrWhiteSpace(apiService.AccessToken))
                 {
-                    Log("API", "No access token configured. Please set token in Settings tab.", true, Color.Red);
+                    Log("API", "❌ No access token configured", true, Color.Red);
                     MessageBox.Show("Please configure your access token in Settings tab first.", "Token Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     tabControl.SelectedIndex = 2; // Switch to Settings tab
                     return;
                 }
 
-                Log("API", "Validating access token with server...");
-                bool authenticated = await apiService.AuthenticateAsync();
+                // Validate API URL is set
+                if (string.IsNullOrWhiteSpace(apiService.ApiUrl))
+                {
+                    Log("API", "❌ No API URL configured", true, Color.Red);
+                    MessageBox.Show("Please configure your API URL in Settings tab first.", "URL Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    tabControl.SelectedIndex = 2;
+                    return;
+                }
+
+                Log("API", "🔐 Validating access token with server...");
+
+                // Call authenticate with logging callback
+                bool authenticated = await apiService.AuthenticateAsync(
+                    msg => Log("API", msg, msg.StartsWith("❌"),
+                        msg.StartsWith("✅") ? Color.Green : (msg.StartsWith("❌") ? Color.Red : Color.Black))
+                );
 
                 if (authenticated)
                 {
                     isApiConnected = true;
                     pnlApiStatus.BackColor = Color.LimeGreen;
-                    lblApiStatusText.Text = "Status: Connected";
+                    lblApiStatusText.Text = "Status: Connected ✓";
                     btnApiConnect.Text = "Disconnect";
-                    lblApiStatus.Text = "API: Authenticated";
-                    Log("API", "Token validated successfully.", false, Color.Green);
+                    lblApiStatus.Text = "API: Authenticated ✓";
+                    Log("API", "✅ Token validated successfully. API is ready for sync.", false, Color.Green);
                 }
                 else
                 {
-                    Log("API", "Token validation failed. Check token and server URL in Settings.", true, Color.Red);
-                    MessageBox.Show("Token validation failed. Check your token and server configuration.", "Connection Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    isApiConnected = false;
+                    pnlApiStatus.BackColor = Color.Red;
+                    lblApiStatusText.Text = "Status: Failed ✗";
+                    btnApiConnect.Text = "Retry";
+                    lblApiStatus.Text = "API: Failed ✗";
+                    Log("API", "❌ Token validation failed. Check your token and API URL in Settings.", true, Color.Red);
                 }
             }
-            catch (Exception ex)
+            catch (System.Exception ex)
             {
                 Log("ERROR", $"API connection error: {ex.Message}", true, Color.Red);
+                isApiConnected = false;
+                pnlApiStatus.BackColor = Color.Red;
+                lblApiStatusText.Text = "Status: Error ✗";
             }
         }
+
 
 
         private async Task DisconnectApiAsync()
@@ -734,13 +924,14 @@ namespace BiometricAttendanceBridge
             }
         }
 
+        // Updated ShowCommunicationLog with device fetches AND server pushes
         private void ShowCommunicationLog()
         {
             var form = new Form()
             {
-                Text = "Communication Log",
-                Width = 700,
-                Height = 500,
+                Text = "Communication Log - Device & Server Activity",
+                Width = 900,
+                Height = 600,
                 StartPosition = FormStartPosition.CenterParent
             };
 
@@ -752,31 +943,63 @@ namespace BiometricAttendanceBridge
                 BackColor = Color.White
             };
 
+            // Combine device logs AND communication events
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("=== DEVICE FETCHES ===");
             if (logHistory.Count > 0)
             {
-                rtb.Text = string.Join("\n", logHistory.Select(l =>
-                    $"[{l.Timestamp:yyyy-MM-dd HH:mm:ss}] Device: {l.SerialNumber} | User ID: {l.UserId} | Type: {l.Type}"));
+                foreach (var log in logHistory)
+                {
+                    sb.AppendLine($"[{log.Timestamp:yyyy-MM-dd HH:mm:ss}] Device: {log.SerialNumber} | User: {log.UserId} | Type: {log.Type}");
+                }
             }
             else
             {
-                rtb.Text = "No communication logs available.";
+                sb.AppendLine("No device records fetched yet.");
             }
 
+            sb.AppendLine("\n=== SERVER COMMUNICATION ===");
+            if (communicationHistory.Count > 0)
+            {
+                foreach (var evt in communicationHistory)
+                {
+                    sb.AppendLine(evt);
+                }
+            }
+            else
+            {
+                sb.AppendLine("No server communication yet.");
+            }
+
+            rtb.Text = sb.ToString();
             form.Controls.Add(rtb);
             form.ShowDialog();
         }
 
+        // Enhanced ShowPendingQueue with TWO sections
         private void ShowPendingQueue()
         {
             var form = new Form()
             {
-                Text = "Pending Queue",
-                Width = 700,
-                Height = 500,
+                Text = "Pending Queue Management",
+                Width = 900,
+                Height = 600,
                 StartPosition = FormStartPosition.CenterParent
             };
 
-            var rtb = new RichTextBox()
+            // Create TabControl for two sections
+            var tabQueue = new TabControl()
+            {
+                Dock = DockStyle.Fill
+            };
+
+            // TAB 1: PENDING LOGS (Awaiting Server Push)
+            var tabPendingLogs = new TabPage("Pending Logs (Awaiting Server)")
+            {
+                Padding = new Padding(10)
+            };
+
+            var rtbPendingLogs = new RichTextBox()
             {
                 Dock = DockStyle.Fill,
                 ReadOnly = true,
@@ -784,18 +1007,161 @@ namespace BiometricAttendanceBridge
                 BackColor = Color.White
             };
 
-            var pending = localStorage.LoadPendingLogs();
-            if (pending.Count > 0)
+            var pendingLogs = localStorage.LoadPendingLogs();
+            if (pendingLogs.Count > 0)
             {
-                rtb.Text = string.Join("\n", pending.Select(l =>
-                    $"[{l.Timestamp:yyyy-MM-dd HH:mm:ss}] Device: {l.SerialNumber} | User ID: {l.UserId} | Type: {l.Type}"));
+                StringBuilder sbLogs = new StringBuilder();
+                sbLogs.AppendLine($"Total Pending Records: {pendingLogs.Count}\n");
+                sbLogs.AppendLine("═══════════════════════════════════════════════════════════════");
+
+                foreach (var log in pendingLogs)
+                {
+                    sbLogs.AppendLine($"[{log.Timestamp:yyyy-MM-dd HH:mm:ss}]");
+                    sbLogs.AppendLine($"  Device: {log.SerialNumber}");
+                    sbLogs.AppendLine($"  User ID: {log.UserId}");
+                    sbLogs.AppendLine($"  Type: {log.Type}");
+                    sbLogs.AppendLine($"  Status: PENDING - Waiting for server connection");
+                    sbLogs.AppendLine("───────────────────────────────────────────────────────────────");
+                }
+                rtbPendingLogs.Text = sbLogs.ToString();
             }
             else
             {
-                rtb.Text = "No pending records in queue.";
+                rtbPendingLogs.Text = "✓ No pending logs. All records have been pushed to server.";
             }
 
-            form.Controls.Add(rtb);
+            // Add button to retry push
+            var btnRetryPush = new Button()
+            {
+                Text = "Retry Push Pending Logs",
+                Location = new Point(10, 10),
+                Size = new Size(200, 30),
+                Dock = DockStyle.Top
+            };
+            btnRetryPush.Click += async (s, e) =>
+            {
+                if (isApiConnected && pendingLogs.Count > 0)
+                {
+                    bool pushed = await apiService.PushLogsAsync(pendingLogs);
+                    if (pushed)
+                    {
+                        localStorage.ClearLogs();
+                        MessageBox.Show($"✓ Successfully pushed {pendingLogs.Count} logs!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        Log("API", $"Retried and successfully pushed {pendingLogs.Count} pending logs.", false, Color.Green);
+                        rtbPendingLogs.Text = "✓ All logs pushed successfully!";
+                    }
+                    else
+                    {
+                        MessageBox.Show("✗ Push failed. Try again later.", "Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+                else if (!isApiConnected)
+                {
+                    MessageBox.Show("✗ Server not connected. Connect to API first.", "Not Connected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+            tabPendingLogs.Controls.Add(btnRetryPush);
+            tabPendingLogs.Controls.Add(rtbPendingLogs);
+
+            // TAB 2: PENDING COMMANDS (Awaiting Device Execution)
+            var tabPendingCommands = new TabPage("Pending Commands (Awaiting Device)")
+            {
+                Padding = new Padding(10)
+            };
+
+            var rtbPendingCommands = new RichTextBox()
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                Font = new Font("Consolas", 9),
+                BackColor = Color.White
+            };
+
+            // Fetch pending commands from server
+            Task.Run(async () =>
+            {
+                try
+                {
+                    var pendingCommands = await apiService.GetPendingCommandsAsync();
+
+                    if (pendingCommands.Count > 0)
+                    {
+                        StringBuilder sbCommands = new StringBuilder();
+                        sbCommands.AppendLine($"Total Pending Commands: {pendingCommands.Count}\n");
+                        sbCommands.AppendLine("═══════════════════════════════════════════════════════════════");
+
+                        foreach (var cmd in pendingCommands)
+                        {
+                            sbCommands.AppendLine($"[{cmd.CreatedAt:yyyy-MM-dd HH:mm:ss}]");
+                            sbCommands.AppendLine($"  Device Serial: {cmd.SerialNumber}");
+                            sbCommands.AppendLine($"  Command: {cmd.CommandText}");
+                            sbCommands.AppendLine($"  Reference: {cmd.CommandReference}");
+                            sbCommands.AppendLine($"  Status: PENDING - Waiting for device execution");
+                            sbCommands.AppendLine("───────────────────────────────────────────────────────────────");
+                        }
+                        rtbPendingCommands.Invoke((MethodInvoker)delegate
+                        {
+                            rtbPendingCommands.Text = sbCommands.ToString();
+                        });
+                    }
+                    else
+                    {
+                        rtbPendingCommands.Invoke((MethodInvoker)delegate
+                        {
+                            rtbPendingCommands.Text = "✓ No pending commands. All devices are up to date.";
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    rtbPendingCommands.Invoke((MethodInvoker)delegate
+                    {
+                        rtbPendingCommands.Text = $"✗ Error fetching pending commands: {ex.Message}";
+                    });
+                }
+            });
+
+            // Add button to retry command fetch
+            var btnRetryCommands = new Button()
+            {
+                Text = "Refresh Pending Commands",
+                Location = new Point(10, 10),
+                Size = new Size(200, 30),
+                Dock = DockStyle.Top
+            };
+            btnRetryCommands.Click += async (s, e) =>
+            {
+                if (isApiConnected)
+                {
+                    try
+                    {
+                        var cmds = await apiService.GetPendingCommandsAsync();
+                        StringBuilder sb = new StringBuilder();
+                        sb.AppendLine($"Total Pending Commands: {cmds.Count}\n");
+                        foreach (var cmd in cmds)
+                        {
+                            sb.AppendLine($"[{cmd.CreatedAt:yyyy-MM-dd HH:mm:ss}] {cmd.SerialNumber} | {cmd.CommandText} | Ref: {cmd.CommandReference}");
+                        }
+                        rtbPendingCommands.Text = cmds.Count > 0 ? sb.ToString() : "✓ No pending commands.";
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Error: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("✗ Server not connected.", "Not Connected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+            tabPendingCommands.Controls.Add(btnRetryCommands);
+            tabPendingCommands.Controls.Add(rtbPendingCommands);
+
+            // Add tabs to control
+            tabQueue.TabPages.Add(tabPendingLogs);
+            tabQueue.TabPages.Add(tabPendingCommands);
+
+            form.Controls.Add(tabQueue);
             form.ShowDialog();
         }
 
