@@ -6,7 +6,7 @@ using System.Text;
 using System.Data;
 using System.Data.OleDb;
 
-namespace SBXPCDLLSampleCSharp
+namespace BiometricAttendanceBridge
 {
     public class EnrollData
     {

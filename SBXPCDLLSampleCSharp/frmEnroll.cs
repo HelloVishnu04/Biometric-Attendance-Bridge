@@ -11,7 +11,7 @@ using System.Runtime.InteropServices;
 using System.IO;
 using System.Xml.Linq;
 
-namespace SBXPCDLLSampleCSharp
+namespace BiometricAttendanceBridge
 {
     public partial class frmEnroll : Form
     {

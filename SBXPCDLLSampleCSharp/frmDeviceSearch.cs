@@ -10,7 +10,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Windows.Forms;
 
-namespace SBXPCDLLSampleCSharp
+namespace BiometricAttendanceBridge
 {
     public partial class frmDeviceSearch : Form
     {

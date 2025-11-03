@@ -1,4 +1,4 @@
-﻿namespace SBXPCDLLSampleCSharp
+﻿namespace BiometricAttendanceBridge
 {
 	partial class frmLog
     {

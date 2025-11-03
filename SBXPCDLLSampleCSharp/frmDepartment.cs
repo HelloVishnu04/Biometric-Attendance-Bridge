@@ -9,7 +9,7 @@ using System.Windows.Forms;
 
 using System.Runtime.InteropServices;
 
-namespace SBXPCDLLSampleCSharp
+namespace BiometricAttendanceBridge
 {
     public partial class frmDepartment : Form
     {

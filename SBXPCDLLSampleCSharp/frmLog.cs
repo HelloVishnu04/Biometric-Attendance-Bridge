@@ -10,7 +10,7 @@ using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using System.IO;
 
-namespace SBXPCDLLSampleCSharp
+namespace BiometricAttendanceBridge
 {
 	public partial class frmLog : Form
     {

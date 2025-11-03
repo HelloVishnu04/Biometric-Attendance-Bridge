@@ -1,9 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 2013
-VisualStudioVersion = 12.0.31101.0
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36414.22 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SBXPCDLLSampleCSharp", "SBXPCDLLSampleCSharp\SBXPCDLLSampleCSharp.csproj", "{DDEB1112-DA10-4CF7-B8ED-46EAECFA21AE}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BiometricAttendanceBridge", "SBXPCDLLSampleCSharp\BiometricAttendanceBridge.csproj", "{DDEB1112-DA10-4CF7-B8ED-46EAECFA21AE}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -24,5 +24,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {AC0F1C78-AD1E-42DC-8338-AD946B2A7092}
 	EndGlobalSection
 EndGlobal
