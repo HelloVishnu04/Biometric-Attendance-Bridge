@@ -37,8 +37,10 @@ namespace BiometricAttendanceBridge
         private int selectedMachineNumber = -1;
         private bool isSyncing = false, isDeviceConnected = false, isApiConnected = false;
         private List<AttendanceLog> logHistory = new List<AttendanceLog>();
+        
         // Track communication events (both fetches and pushes)
         private List<string> communicationHistory = new List<string>();
+        
         // Pagination state for User Management
         private List<BiometricUser> allUsers = new List<BiometricUser>();
         private int currentUserPage = 1;
