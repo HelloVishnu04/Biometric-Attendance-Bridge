@@ -977,8 +977,18 @@ namespace sbxpc
 
 		[DllImport(Dll64, EntryPoint = "_GetAllUserID", CallingConvention = CallingConvention.Winapi)] static extern byte _GetAllUserID64(Int32 dwMachineNumber, IntPtr dwEnrollNumber, IntPtr dwEMachineNumber, IntPtr dwBackupNumber, IntPtr dwMachinePrivilege, IntPtr dwEnable);
 		[DllImport(Dll32, EntryPoint = "_GetAllUserID", CallingConvention = CallingConvention.Winapi)] static extern byte _GetAllUserID(Int32 dwMachineNumber, IntPtr dwEnrollNumber, IntPtr dwEMachineNumber, IntPtr dwBackupNumber, IntPtr dwMachinePrivilege, IntPtr dwEnable);
-        public static bool GetAllUserID(Int32 dwMachineNumber, out Int32 dwEnrollNumber, out Int32 dwEMachineNumber, out Int32 dwBackupNumber, out Int32 dwMachinePrivilege, out Int32 dwEnable)
+        public static bool GetAllUserID(
+    Int32 dwMachineNumber,
+    out string enrollNo,
+    out string name,
+    out Int32 dwEnrollNumber,
+    out Int32 dwEMachineNumber,
+    out Int32 dwBackupNumber,
+    out Int32 dwMachinePrivilege,
+    out Int32 dwEnable)
         {
+            enrollNo = "";
+            name = "";
             dwEnrollNumber = 0;
             dwEMachineNumber = 0;
             dwBackupNumber = 0;
