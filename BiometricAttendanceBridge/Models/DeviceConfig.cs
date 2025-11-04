@@ -42,6 +42,7 @@ namespace BiometricAttendanceBridge.Models
         public string Name { get; set; }
         public int Privilege { get; set; }
         public int EnabledStatus { get; set; }
+        public string DeviceUniqueID { get; set; }
     }
 
 }

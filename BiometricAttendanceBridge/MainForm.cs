@@ -56,7 +56,11 @@ namespace BiometricAttendanceBridge
             PopulateDeviceLists();
             Log("SYSTEM", "Application started. Ready to connect to devices and server.");
             try { SBXPCDLL.DotNET(); } catch { }
+    
+            // Auto-connect on startup
+            this.Load += async (s, e) => await AutoConnectOnStartup();
         }
+
         private void InitializeServices()
         {
             configManager = new ConfigurationManager();  // Create ONCE
@@ -117,6 +121,142 @@ namespace BiometricAttendanceBridge
             this.Controls.Add(statusStrip);
         }
 
+        // ============ AUTO-CONNECT ON STARTUP ============
+        private async Task AutoConnectOnStartup()
+        {
+            try
+            {
+                Log("SYSTEM", "═══════════════════════════════════════");
+                Log("SYSTEM", "Auto-connect sequence started...", false, Color.Blue);
+                Log("SYSTEM", $"Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}", false, Color.Blue);
+
+                // STEP 1: Auto-connect to all devices
+                Log("DEVICE", "Step 1: Auto-connecting to configured devices...");
+                await AutoConnectDevices();
+
+                // STEP 2: Auto-connect to API
+                Log("API", "Step 2: Auto-connecting to API...");
+                await ConnectApiAsync();
+
+                Log("SYSTEM", "✓ Auto-connect sequence completed", false, Color.Green);
+                Log("SYSTEM", "═══════════════════════════════════════");
+            }
+            catch (Exception ex)
+            {
+                Log("ERROR", $"Auto-connect error: {ex.Message}", true, Color.Red);
+            }
+        }
+
+        // ============ AUTO-CONNECT TO ALL DEVICES ============
+        private async Task AutoConnectDevices()
+        {
+            try
+            {
+                if (deviceManager.Devices == null || deviceManager.Devices.Count == 0)
+                {
+                    Log("DEVICE", "⚠ No devices configured yet", true, Color.Orange);
+                    return;
+                }
+
+                Log("DEVICE", $"Found {deviceManager.Devices.Count} configured device(s)");
+
+                foreach (var device in deviceManager.Devices)
+                {
+                    try
+                    {
+                        Log("DEVICE", $"  Attempting: {device.Name} ({device.IPAddress}:{device.Port})");
+                        bool connected = await deviceManager.ConnectAsync(device);
+
+                        if (connected)
+                        {
+                            isDeviceConnected = true;
+                            selectedMachineNumber = device.MachineNumber;
+                            pnlDeviceStatus.BackColor = Color.LimeGreen;
+                            lblDeviceStatus.Text = "Status: Connected";
+                            lblSelectedDevice.Text = $"DEVICE: {device.Name}";
+                            RefreshUserListFromDevice(selectedMachineNumber, lvUsers);
+                            Log("DEVICE", $"  ✓ Connected to {device.Name}", false, Color.Green);
+                            GetDeviceInfo();
+                        }
+                        else
+                        {
+                            Log("DEVICE", $"  ✗ Connection attempt failed", true, Color.Red);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log("DEVICE", $"  ✗ Error: {ex.Message}", true, Color.Red);
+                    }
+
+                    // Small delay between attempts
+                    await Task.Delay(500);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("ERROR", $"Auto-connect devices error: {ex.Message}", true, Color.Red);
+            }
+        }
+
+        // ============ GET DEVICE INFO ============
+        private void GetDeviceInfo()
+        {
+            if (selectedMachineNumber <= 0)
+            {
+                MessageBox.Show("Please select a device first.");
+                return;
+            }
+
+            try
+            {
+                Log("DEVICE", "Fetching device information...");
+
+                // Device Info Types
+                int DEVICE_CAPACITY = 1;  // Total fingerprint capacity
+                int DEVICE_SERIALNUMBER = 2;  // Serial number
+                int DEVICE_VERSION = 3;  // Firmware version
+                int DEVICE_USERS = 4;  // Number of users
+                int DEVICE_FINGERS = 5;  // Number of fingerprints
+                int DEVICE_LOGS = 6;  // Number of logs
+
+                // Get Total User Capacity
+                if (SBXPCDLL.GetDeviceInfo(selectedMachineNumber, DEVICE_CAPACITY, out UInt32 capacity))
+                {
+                    Log("DEVICE", $"Device Capacity: {capacity} users", false, Color.Black);
+                }
+
+                // Get Firmware Version
+                if (SBXPCDLL.GetDeviceInfo(selectedMachineNumber, DEVICE_VERSION, out UInt32 version))
+                {
+                    Log("DEVICE", $"Firmware Version: {version}", false, Color.Black);
+                }
+
+                // Get Current User Count
+                if (SBXPCDLL.GetDeviceInfo(selectedMachineNumber, DEVICE_USERS, out UInt32 users))
+                {
+                    Log("DEVICE", $"Registered Users: {users}", false, Color.Black);
+                }
+
+                // Get Total Fingerprints
+                if (SBXPCDLL.GetDeviceInfo(selectedMachineNumber, DEVICE_FINGERS, out UInt32 fingers))
+                {
+                    Log("DEVICE", $"Total Fingerprints: {fingers}", false, Color.Black);
+                }
+
+                // Get Total Logs
+                if (SBXPCDLL.GetDeviceInfo(selectedMachineNumber, DEVICE_LOGS, out UInt32 logs))
+                {
+                    Log("DEVICE", $"Total Attendance Logs: {logs}", false, Color.Black);
+                }
+
+                Log("DEVICE", "✓ Device info retrieved successfully", false, Color.Green);
+            }
+            catch (Exception ex)
+            {
+                Log("ERROR", $"Get device info error: {ex.Message}", true, Color.Red);
+                MessageBox.Show($"Error: {ex.Message}", "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
         private void CreateDashboardTab()
         {
             GroupBox gbDeviceMgmt = new GroupBox() { Text = "Device Management", Location = new Point(10, 10), Size = new Size(380, 320) };
@@ -224,106 +364,628 @@ namespace BiometricAttendanceBridge
         }
 
         private void CreateUserManagementTab()
+{
+    Label lblTitle = new Label()
+    {
+        Text = "Biometric Device User Management",
+        Font = new Font(this.Font.FontFamily, 16, FontStyle.Bold),
+        Location = new Point(0, 0),
+        AutoSize = true
+    };
+    tabUserMgmt.Controls.Add(lblTitle);
+
+    lvUsers = new ListView()
+    {
+        Location = new Point(0, 40),
+        Size = new Size(850, 280),
+        View = View.Details,
+        FullRowSelect = true,
+        BorderStyle = BorderStyle.FixedSingle
+    };
+    lvUsers.Columns.Add("Enroll No", 80);
+    lvUsers.Columns.Add("Name", 150);
+    lvUsers.Columns.Add("Privilege", 80);
+    lvUsers.Columns.Add("Status", 80);
+    lvUsers.Columns.Add("EMachine", 80);
+    lvUsers.Columns.Add("Backup", 80);
+    tabUserMgmt.Controls.Add(lvUsers);
+
+    // Button Panel
+    Panel pnlButtons = new Panel()
+    {
+        Location = new Point(0, 330),
+        Size = new Size(850, 50),
+        BorderStyle = BorderStyle.FixedSingle
+    };
+    tabUserMgmt.Controls.Add(pnlButtons);
+
+    btnRefreshUsers = new Button()
+    {
+        Text = "🔄 Refresh",
+        Location = new Point(5, 8),
+        Size = new Size(95, 32),
+        Font = new Font(this.Font, FontStyle.Bold)
+    };
+    btnRefreshUsers.Click += (s, e) => RefreshUserListFromDevice(selectedMachineNumber, lvUsers);
+    pnlButtons.Controls.Add(btnRefreshUsers);
+
+    Button btnAddUser = new Button()
+    {
+        Text = "➕ Add User",
+        Location = new Point(105, 8),
+        Size = new Size(95, 32),
+        Font = new Font(this.Font, FontStyle.Bold)
+    };
+    btnAddUser.Click += BtnAddUser_Click;
+    pnlButtons.Controls.Add(btnAddUser);
+
+    Button btnModifyUser = new Button()
+    {
+        Text = "✏️ Modify",
+        Location = new Point(205, 8),
+        Size = new Size(95, 32),
+        Font = new Font(this.Font, FontStyle.Bold)
+    };
+    btnModifyUser.Click += BtnModifyUser_Click;
+    pnlButtons.Controls.Add(btnModifyUser);
+
+    Button btnDeleteUser = new Button()
+    {
+        Text = "🗑️ Delete",
+        Location = new Point(305, 8),
+        Size = new Size(95, 32),
+        Font = new Font(this.Font, FontStyle.Bold)
+    };
+    btnDeleteUser.Click += BtnDeleteUser_Click;
+    pnlButtons.Controls.Add(btnDeleteUser);
+
+    Button btnModifyPrivilege = new Button()
+    {
+        Text = "👤 Privilege",
+        Location = new Point(405, 8),
+        Size = new Size(95, 32),
+        Font = new Font(this.Font, FontStyle.Bold)
+    };
+    btnModifyPrivilege.Click += BtnModifyPrivilege_Click;
+    pnlButtons.Controls.Add(btnModifyPrivilege);
+
+    Button btnToggleEnable = new Button()
+    {
+        Text = "⚙️ Enable/Disable",
+        Location = new Point(505, 8),
+        Size = new Size(120, 32),
+        Font = new Font(this.Font, FontStyle.Bold)
+    };
+    btnToggleEnable.Click += BtnToggleEnable_Click;
+    pnlButtons.Controls.Add(btnToggleEnable);
+
+    Button btnClearAll = new Button()
+    {
+        Text = "🔴 Clear All",
+        Location = new Point(730, 8),
+        Size = new Size(110, 32),
+        Font = new Font(this.Font, FontStyle.Bold),
+        BackColor = Color.LightCoral,
+        ForeColor = Color.White
+    };
+    btnClearAll.Click += BtnClearAll_Click;
+    pnlButtons.Controls.Add(btnClearAll);
+}
+
+        // ============ ADD USER WITHOUT FINGERPRINT (SAFE) ============
+        private void BtnAddUser_Click(object sender, EventArgs e)
         {
-            Label lblTitle = new Label()
+            if (selectedMachineNumber <= 0)
             {
-                Text = "Biometric Device User List",
-                Font = new Font(this.Font.FontFamily, 16, FontStyle.Bold),
-                Location = new Point(0, 0),
-                AutoSize = true
-            };
-            tabUserMgmt.Controls.Add(lblTitle);
+                MessageBox.Show("Please select a device first.");
+                return;
+            }
 
-            // Info label showing current page and total users
-            Label lblPageInfo = new Label()
+            var form = new Form()
             {
-                Text = "Page 1 | Total Users: 0",
-                Location = new Point(0, 35),
-                AutoSize = true,
-                Font = new Font(this.Font, FontStyle.Regular),
-                ForeColor = Color.Blue,
-                Name = "lblPageInfo"
+                Text = "Add New User to Device",
+                Width = 400,
+                Height = 280,
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false
             };
-            tabUserMgmt.Controls.Add(lblPageInfo);
 
-            lvUsers = new ListView()
-            {
-                Location = new Point(0, 60),
-                Size = new Size(570, 280),
-                View = View.Details,
-                FullRowSelect = true,
-                BorderStyle = BorderStyle.FixedSingle
-            };
-            lvUsers.Columns.Add("Enroll No", 100);
-            lvUsers.Columns.Add("Name", 180);
-            lvUsers.Columns.Add("Privilege", 100);
-            lvUsers.Columns.Add("Status", 90);
-            tabUserMgmt.Controls.Add(lvUsers);
+            Label lblEnrollNo = new Label() { Text = "Enrollment No:", Location = new Point(20, 20), AutoSize = true, Font = new Font(this.Font, FontStyle.Bold) };
+            TextBox txtEnrollNo = new TextBox() { Location = new Point(150, 20), Width = 220, Height = 28 };
+            form.Controls.Add(lblEnrollNo);
+            form.Controls.Add(txtEnrollNo);
 
-            // Pagination buttons panel
-            Panel pnlPagination = new Panel()
-            {
-                Location = new Point(0, 350),
-                Size = new Size(570, 40),
-                BorderStyle = BorderStyle.FixedSingle
-            };
-            tabUserMgmt.Controls.Add(pnlPagination);
+            Label lblName = new Label() { Text = "User Name:", Location = new Point(20, 60), AutoSize = true, Font = new Font(this.Font, FontStyle.Bold) };
+            TextBox txtName = new TextBox() { Location = new Point(150, 60), Width = 220, Height = 28 };
+            form.Controls.Add(lblName);
+            form.Controls.Add(txtName);
 
-            Button btnPrevPage = new Button()
+            Label lblPrivilege = new Label() { Text = "Privilege Level:", Location = new Point(20, 100), AutoSize = true, Font = new Font(this.Font, FontStyle.Bold) };
+            ComboBox cmbPrivilege = new ComboBox()
             {
-                Text = "< Previous",
-                Location = new Point(5, 5),
-                Size = new Size(80, 30)
+                Items = { "0 - User", "1 - User", "14 - Admin", "15 - Super Admin" },
+                Text = "0 - User",
+                Location = new Point(150, 100),
+                Width = 220,
+                Height = 28,
+                DropDownStyle = ComboBoxStyle.DropDownList
             };
-            btnPrevPage.Click += (s, e) =>
+            form.Controls.Add(lblPrivilege);
+            form.Controls.Add(cmbPrivilege);
+
+            Button btnOk = new Button() { Text = "Add User", Location = new Point(210, 220), Size = new Size(80, 35), DialogResult = DialogResult.OK };
+            Button btnCancel = new Button() { Text = "Cancel", Location = new Point(300, 220), Size = new Size(80, 35), DialogResult = DialogResult.Cancel };
+            form.Controls.Add(btnOk);
+            form.Controls.Add(btnCancel);
+
+            form.AcceptButton = btnOk;
+            form.CancelButton = btnCancel;
+
+            if (form.ShowDialog() == DialogResult.OK)
             {
-                if (currentUserPage > 1)
+                if (string.IsNullOrWhiteSpace(txtEnrollNo.Text) || string.IsNullOrWhiteSpace(txtName.Text))
                 {
-                    currentUserPage--;
-                    DisplayUserPage();
+                    MessageBox.Show("Please fill in all required fields.");
+                    return;
                 }
-            };
-            pnlPagination.Controls.Add(btnPrevPage);
 
-            Label lblPageNav = new Label()
-            {
-                Text = $"Page {currentUserPage}",
-                Location = new Point(200, 10),
-                AutoSize = true,
-                Font = new Font(this.Font, FontStyle.Bold),
-                Name = "lblPageNav"
-            };
-            pnlPagination.Controls.Add(lblPageNav);
-
-            Button btnNextPage = new Button()
-            {
-                Text = "Next >",
-                Location = new Point(485, 5),
-                Size = new Size(80, 30)
-            };
-            btnNextPage.Click += (s, e) =>
-            {
-                int totalPages = (int)Math.Ceiling((double)allUsers.Count / USERS_PER_PAGE);
-                if (currentUserPage < totalPages)
+                if (!int.TryParse(txtEnrollNo.Text, out int enrollNo))
                 {
-                    currentUserPage++;
-                    DisplayUserPage();
+                    MessageBox.Show("Invalid enrollment number.");
+                    return;
                 }
-            };
-            pnlPagination.Controls.Add(btnNextPage);
 
-            btnRefreshUsers = new Button()
+                try
+                {
+                    int privilege = int.Parse(cmbPrivilege.Text.Split('-')[0].Trim());
+
+                    Log("DEVICE", $"Adding user: {enrollNo} - {txtName.Text}");
+
+                    // ✓ Just set the name directly - device creates user entry
+                    if (SBXPCDLL.SetUserName1(selectedMachineNumber, enrollNo, txtName.Text))
+                    {
+                        Log("DEVICE", $"✓ User '{txtName.Text}' (ID: {enrollNo}) added successfully.", false, Color.Green);
+                        MessageBox.Show("User added successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        RefreshUserListFromDevice(selectedMachineNumber, lvUsers);
+                    }
+                    else
+                    {
+                        Log("DEVICE", $"✗ Failed to add user", true, Color.Red);
+                        MessageBox.Show("Failed to add user.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log("ERROR", $"Add user error: {ex.Message}", true, Color.Red);
+                    MessageBox.Show($"Error: {ex.Message}", "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        // ============ MODIFY USER NAME (WITH SAFE SUBITEM ACCESS) ============
+        private void BtnModifyUser_Click(object sender, EventArgs e)
+        {
+            if (lvUsers.SelectedItems.Count == 0)
             {
-                Text = "Refresh Users",
-                Location = new Point(0, 395),
-                Size = new Size(125, 32)
-            };
-            btnRefreshUsers.Click += (s, e) =>
+                MessageBox.Show("Please select a user to modify.");
+                return;
+            }
+
+            if (selectedMachineNumber <= 0)
             {
-                currentUserPage = 1; // Reset to page 1
-                RefreshUserListFromDevice(selectedMachineNumber, lvUsers);
-            };
-            tabUserMgmt.Controls.Add(btnRefreshUsers);
+                MessageBox.Show("Please select a device first.");
+                return;
+            }
+
+            try
+            {
+                ListViewItem selectedItem = lvUsers.SelectedItems[0];
+                
+                // ✓ SAFE SubItem access - check length first
+                string enrollNo = selectedItem.Text;
+                string currentName = selectedItem.SubItems.Count > 1 ? selectedItem.SubItems[1].Text : "Unknown";
+
+                if (!int.TryParse(enrollNo, out int enrollNumber))
+                {
+                    MessageBox.Show("Invalid enrollment number.");
+                    return;
+                }
+
+                var form = new Form()
+                {
+                    Text = "Modify User Name",
+                    Width = 400,
+                    Height = 200,
+                    StartPosition = FormStartPosition.CenterParent,
+                    FormBorderStyle = FormBorderStyle.FixedDialog,
+                    MaximizeBox = false,
+                    MinimizeBox = false
+                };
+
+                Label lblEnrollNo = new Label() { Text = "Enrollment No:", Location = new Point(20, 20), AutoSize = true, Font = new Font(this.Font, FontStyle.Bold) };
+                TextBox txtEnrollNo = new TextBox() { Text = enrollNo, Location = new Point(150, 20), Width = 220, Height = 28, ReadOnly = true };
+                form.Controls.Add(lblEnrollNo);
+                form.Controls.Add(txtEnrollNo);
+
+                Label lblName = new Label() { Text = "New User Name:", Location = new Point(20, 60), AutoSize = true, Font = new Font(this.Font, FontStyle.Bold) };
+                TextBox txtName = new TextBox() { Text = currentName, Location = new Point(150, 60), Width = 220, Height = 28 };
+                form.Controls.Add(lblName);
+                form.Controls.Add(txtName);
+
+                Button btnOk = new Button() { Text = "Update", Location = new Point(210, 120), Size = new Size(80, 35), DialogResult = DialogResult.OK };
+                Button btnCancel = new Button() { Text = "Cancel", Location = new Point(300, 120), Size = new Size(80, 35), DialogResult = DialogResult.Cancel };
+                form.Controls.Add(btnOk);
+                form.Controls.Add(btnCancel);
+
+                form.AcceptButton = btnOk;
+                form.CancelButton = btnCancel;
+
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        Log("DEVICE", $"Updating user {enrollNumber} name to '{txtName.Text}'");
+                        
+                        if (SBXPCDLL.SetUserName1(selectedMachineNumber, enrollNumber, txtName.Text))
+                        {
+                            Log("DEVICE", $"✓ User name updated successfully.", false, Color.Green);
+                            MessageBox.Show("User name updated successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            RefreshUserListFromDevice(selectedMachineNumber, lvUsers);
+                        }
+                        else
+                        {
+                            Log("DEVICE", $"✗ Failed to update user name", true, Color.Red);
+                            MessageBox.Show("Failed to update user name.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log("ERROR", $"Update error: {ex.Message}", true, Color.Red);
+                        MessageBox.Show($"Error: {ex.Message}", "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("ERROR", $"Modify user error: {ex.Message}", true, Color.Red);
+                MessageBox.Show($"Error: {ex.Message}", "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // ============ DELETE USER (WITH SAFE SUBITEM ACCESS) ============
+        private void BtnDeleteUser_Click(object sender, EventArgs e)
+        {
+            if (lvUsers.SelectedItems.Count == 0)
+            {
+                MessageBox.Show("Please select a user to delete.");
+                return;
+            }
+
+            if (selectedMachineNumber <= 0)
+            {
+                MessageBox.Show("Please select a device first.");
+                return;
+            }
+
+            try
+            {
+                ListViewItem selectedItem = lvUsers.SelectedItems[0];
+
+                // ✓ SAFE SubItem access
+                string enrollNo = selectedItem.Text;
+                string userName = selectedItem.SubItems.Count > 1 ? selectedItem.SubItems[1].Text : "Unknown";
+
+                if (!int.TryParse(enrollNo, out int enrollNumber))
+                {
+                    MessageBox.Show("Invalid enrollment number.");
+                    return;
+                }
+
+                // Safe parsing of optional columns
+                int dwEMachineNumber = 0;
+                int dwBackupNumber = 0;
+
+                if (selectedItem.SubItems.Count > 4 && int.TryParse(selectedItem.SubItems[4].Text, out int eMachine))
+                {
+                    dwEMachineNumber = eMachine;
+                }
+                if (selectedItem.SubItems.Count > 5 && int.TryParse(selectedItem.SubItems[5].Text, out int backup))
+                {
+                    dwBackupNumber = backup;
+                }
+
+                DialogResult result = MessageBox.Show(
+                    $"Are you sure you want to DELETE user '{userName}' (ID: {enrollNo})?",
+                    "Confirm Delete",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning
+                );
+
+                if (result == DialogResult.Yes)
+                {
+                    try
+                    {
+                        Log("DEVICE", $"Deleting user {enrollNumber}...");
+
+                        if (SBXPCDLL.DeleteEnrollData(selectedMachineNumber, enrollNumber, dwEMachineNumber, dwBackupNumber))
+                        {
+                            Log("DEVICE", $"✓ User '{userName}' (ID: {enrollNo}) deleted successfully.", false, Color.Green);
+                            MessageBox.Show("User deleted successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            RefreshUserListFromDevice(selectedMachineNumber, lvUsers);
+                        }
+                        else
+                        {
+                            Log("DEVICE", $"✗ Failed to delete user", true, Color.Red);
+                            MessageBox.Show("Failed to delete user.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log("ERROR", $"Delete error: {ex.Message}", true, Color.Red);
+                        MessageBox.Show($"Error: {ex.Message}", "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("ERROR", $"Delete user error: {ex.Message}", true, Color.Red);
+                MessageBox.Show($"Error: {ex.Message}", "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // ============ MODIFY PRIVILEGE (WITH SAFE SUBITEM ACCESS) ============
+        private void BtnModifyPrivilege_Click(object sender, EventArgs e)
+        {
+            if (lvUsers.SelectedItems.Count == 0)
+            {
+                MessageBox.Show("Please select a user to modify privilege.");
+                return;
+            }
+
+            if (selectedMachineNumber <= 0)
+            {
+                MessageBox.Show("Please select a device first.");
+                return;
+            }
+
+            try
+            {
+                ListViewItem selectedItem = lvUsers.SelectedItems[0];
+
+                // ✓ SAFE SubItem access
+                string enrollNo = selectedItem.Text;
+                string userName = selectedItem.SubItems.Count > 1 ? selectedItem.SubItems[1].Text : "Unknown";
+
+                if (!int.TryParse(enrollNo, out int enrollNumber))
+                {
+                    MessageBox.Show("Invalid enrollment number.");
+                    return;
+                }
+
+                // Safe parsing of optional columns
+                int dwEMachineNumber = 0;
+                int dwBackupNumber = 0;
+
+                if (selectedItem.SubItems.Count > 4 && int.TryParse(selectedItem.SubItems[4].Text, out int eMachine))
+                {
+                    dwEMachineNumber = eMachine;
+                }
+                if (selectedItem.SubItems.Count > 5 && int.TryParse(selectedItem.SubItems[5].Text, out int backup))
+                {
+                    dwBackupNumber = backup;
+                }
+
+                var form = new Form()
+                {
+                    Text = "Modify User Privilege",
+                    Width = 350,
+                    Height = 220,
+                    StartPosition = FormStartPosition.CenterParent,
+                    FormBorderStyle = FormBorderStyle.FixedDialog,
+                    MaximizeBox = false,
+                    MinimizeBox = false
+                };
+
+                Label lblUser = new Label()
+                {
+                    Text = $"User: {userName} (ID: {enrollNo})",
+                    Location = new Point(20, 20),
+                    AutoSize = true,
+                    Font = new Font(this.Font, FontStyle.Bold)
+                };
+                form.Controls.Add(lblUser);
+
+                Label lblPrivilege = new Label() { Text = "Privilege Level:", Location = new Point(20, 60), AutoSize = true, Font = new Font(this.Font, FontStyle.Bold) };
+                ComboBox cmbPrivilege = new ComboBox()
+                {
+                    Items = { "0 - User", "1 - User", "14 - Admin", "15 - Super Admin" },
+                    Text = "0 - User",
+                    Location = new Point(20, 90),
+                    Width = 300,
+                    Height = 28,
+                    DropDownStyle = ComboBoxStyle.DropDownList
+                };
+                form.Controls.Add(lblPrivilege);
+                form.Controls.Add(cmbPrivilege);
+
+                Button btnOk = new Button() { Text = "Update", Location = new Point(180, 150), Size = new Size(80, 35), DialogResult = DialogResult.OK };
+                Button btnCancel = new Button() { Text = "Cancel", Location = new Point(270, 150), Size = new Size(80, 35), DialogResult = DialogResult.Cancel };
+                form.Controls.Add(btnOk);
+                form.Controls.Add(btnCancel);
+
+                form.AcceptButton = btnOk;
+                form.CancelButton = btnCancel;
+
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        int newPrivilege = int.Parse(cmbPrivilege.Text.Split('-')[0].Trim());
+
+                        Log("DEVICE", $"Modifying privilege for user {enrollNumber} to {newPrivilege}...");
+
+                        if (SBXPCDLL.ModifyPrivilege(selectedMachineNumber, enrollNumber, dwEMachineNumber, dwBackupNumber, newPrivilege))
+                        {
+                            Log("DEVICE", $"✓ Privilege updated to level {newPrivilege}.", false, Color.Green);
+                            MessageBox.Show("Privilege updated successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            RefreshUserListFromDevice(selectedMachineNumber, lvUsers);
+                        }
+                        else
+                        {
+                            Log("DEVICE", $"✗ Failed to update privilege", true, Color.Red);
+                            MessageBox.Show("Failed to update user privilege.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log("ERROR", $"Privilege update error: {ex.Message}", true, Color.Red);
+                        MessageBox.Show($"Error: {ex.Message}", "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("ERROR", $"Modify privilege error: {ex.Message}", true, Color.Red);
+                MessageBox.Show($"Error: {ex.Message}", "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // ============ ENABLE/DISABLE USER (WITH SAFE SUBITEM ACCESS) ============
+        private void BtnToggleEnable_Click(object sender, EventArgs e)
+        {
+            if (lvUsers.SelectedItems.Count == 0)
+            {
+                MessageBox.Show("Please select a user to enable/disable.");
+                return;
+            }
+
+            if (selectedMachineNumber <= 0)
+            {
+                MessageBox.Show("Please select a device first.");
+                return;
+            }
+
+            try
+            {
+                ListViewItem selectedItem = lvUsers.SelectedItems[0];
+
+                // ✓ SAFE SubItem access
+                string enrollNo = selectedItem.Text;
+                string userName = selectedItem.SubItems.Count > 1 ? selectedItem.SubItems[1].Text : "Unknown";
+                string currentStatus = selectedItem.SubItems.Count > 3 ? selectedItem.SubItems[3].Text : "Unknown";
+
+                if (!int.TryParse(enrollNo, out int enrollNumber))
+                {
+                    MessageBox.Show("Invalid enrollment number.");
+                    return;
+                }
+
+                // Safe parsing of optional columns
+                int dwEMachineNumber = 0;
+                int dwBackupNumber = 0;
+
+                if (selectedItem.SubItems.Count > 4 && int.TryParse(selectedItem.SubItems[4].Text, out int eMachine))
+                {
+                    dwEMachineNumber = eMachine;
+                }
+                if (selectedItem.SubItems.Count > 5 && int.TryParse(selectedItem.SubItems[5].Text, out int backup))
+                {
+                    dwBackupNumber = backup;
+                }
+
+                byte newFlag = (currentStatus == "Enabled" || currentStatus.Contains("1")) ? (byte)0 : (byte)1;
+                string action = newFlag == 1 ? "Enable" : "Disable";
+
+                DialogResult result = MessageBox.Show(
+                    $"Are you sure you want to {action} user '{userName}' (ID: {enrollNo})?",
+                    $"Confirm {action}",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question
+                );
+
+                if (result == DialogResult.Yes)
+                {
+                    try
+                    {
+                        Log("DEVICE", $"{action}ing user {enrollNumber}...");
+
+                        if (SBXPCDLL.EnableUser(selectedMachineNumber, enrollNumber, dwEMachineNumber, dwBackupNumber, newFlag))
+                        {
+                            Log("DEVICE", $"✓ User '{userName}' (ID: {enrollNo}) {action}d successfully.", false, Color.Green);
+                            MessageBox.Show($"User {action}d successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            RefreshUserListFromDevice(selectedMachineNumber, lvUsers);
+                        }
+                        else
+                        {
+                            Log("DEVICE", $"✗ Failed to {action} user", true, Color.Red);
+                            MessageBox.Show($"Failed to {action} user.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log("ERROR", $"{action} user error: {ex.Message}", true, Color.Red);
+                        MessageBox.Show($"Error: {ex.Message}", "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("ERROR", $"Enable/Disable user error: {ex.Message}", true, Color.Red);
+                MessageBox.Show($"Error: {ex.Message}", "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // ============ CLEAR ALL USERS (DANGEROUS) ============
+        private void BtnClearAll_Click(object sender, EventArgs e)
+        {
+            if (selectedMachineNumber <= 0)
+            {
+                MessageBox.Show("Please select a device first.");
+                return;
+            }
+
+            DialogResult result = MessageBox.Show(
+                "⚠️ WARNING! This will DELETE ALL users from the device!\n\nAre you absolutely sure?",
+                "Clear All Users",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning
+            );
+
+            if (result == DialogResult.Yes)
+            {
+                DialogResult confirm = MessageBox.Show(
+                    "This is your last chance to cancel.\n\nClick YES to proceed with deletion of ALL users.",
+                    "Final Confirmation",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning
+                );
+
+                if (confirm == DialogResult.Yes)
+                {
+                    try
+                    {
+                        // Use EmptyEnrollData instead of ClearAllUser
+                        if (SBXPCDLL.EmptyEnrollData(selectedMachineNumber))
+                        {
+                            Log("DEVICE", $"✓ All users cleared from device.", false, Color.Green);
+                            MessageBox.Show("All users cleared successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            RefreshUserListFromDevice(selectedMachineNumber, lvUsers);
+                        }
+                        else
+                        {
+                            Log("DEVICE", $"✗ Failed to clear all users", true, Color.Red);
+                            MessageBox.Show("Failed to clear users from device.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Error: {ex.Message}", "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        Log("ERROR", $"Clear all users error: {ex.Message}", true, Color.Red);
+                    }
+                }
+            }
         }
 
         // Display current page of users
@@ -349,7 +1011,8 @@ namespace BiometricAttendanceBridge
                     user.EnrollNo,
                     user.Name,
                     user.Privilege.ToString(),
-                    user.EnabledStatus == 1 ? "Enabled" : "Disabled"
+                    user.EnabledStatus == 1 ? "Enabled" : "Disabled",
+                    user.DeviceUniqueID
                 }));
             }
 
@@ -379,61 +1042,87 @@ namespace BiometricAttendanceBridge
         }
 
         private void RefreshUserListFromDevice(int machineNumber, ListView lvUsers)
+{
+    allUsers.Clear();
+    currentUserPage = 1;
+
+    if (machineNumber <= 0)
+    {
+        MessageBox.Show("Please select a device first.");
+        return;
+    }
+
+    try
+    {
+        Log("DEVICE", "Fetching user list from device...");
+
+        // HashSet to track already added users (by enrollment number)
+        HashSet<string> addedEnrollNumbers = new HashSet<string>();
+
+        if (SBXPCDLL.ReadAllUserID(machineNumber))
         {
-            allUsers.Clear();
-            currentUserPage = 1;
-
-            if (machineNumber <= 0)
+            string enrollNo = "";
+            string name = "";
+            string dwDeviceUniqueId = "";
+            int dwEnrollNumber, dwEMachineNumber, dwBackupNumber, dwMachinePrivilege, dwEnable;
+            
+            while (SBXPCDLL.GetAllUserID(
+                machineNumber,
+                out enrollNo,
+                out name,
+                out dwEnrollNumber,
+                out dwEMachineNumber,
+                out dwBackupNumber,
+                out dwMachinePrivilege,
+                out dwEnable))
             {
-                MessageBox.Show("Please select a device first.");
-                return;
-            }
-
-            try
-            {
-                Log("DEVICE", "Fetching user list from device...");
-
-                if (SBXPCDLL.ReadAllUserID(machineNumber))
+                // Only add if we haven't already added this enrollment number
+                if (!addedEnrollNumbers.Contains(dwEnrollNumber.ToString()))
                 {
-                    string enrollNo, name;
-                    int dwEnrollNumber, dwEMachineNumber, dwBackupNumber, dwMachinePrivilege, dwEnable;
-
-                    while (SBXPCDLL.GetAllUserID(
-                        machineNumber,
-                        out enrollNo,
-                        out name,
-                        out dwEnrollNumber,
-                        out dwEMachineNumber,
-                        out dwBackupNumber,
-                        out dwMachinePrivilege,
-                        out dwEnable))
+                    // Fetch the actual user name using GetUserName1
+                    string actualUserName = "";
+                    try
                     {
-                        allUsers.Add(new BiometricUser
-                        {
-                            EnrollNo = enrollNo,
-                            Name = name,
-                            Privilege = dwMachinePrivilege,
-                            EnabledStatus = dwEnable
-                        });
+                        SBXPCDLL.GetUserName1(machineNumber, dwEnrollNumber, out actualUserName);
+                        SBXPCDLL.GetDeviceUniqueID(machineNumber, out dwDeviceUniqueId);
+                    }
+                    catch
+                    {
+                        actualUserName = "";
                     }
 
-                    Log("DEVICE", $"Successfully fetched {allUsers.Count} users from device.", false, Color.Green);
-                    DisplayUserPage();
-                }
-                else
-                {
-                    Log("DEVICE", "Failed to read user list from device.", true, Color.Red);
-                    MessageBox.Show("Unable to fetch user list from device.");
+                    allUsers.Add(new BiometricUser
+                    {
+                        EnrollNo = dwEnrollNumber.ToString(),
+                        Name = string.IsNullOrWhiteSpace(actualUserName) ? "User_" + dwEnrollNumber.ToString() : actualUserName,
+                        Privilege = dwMachinePrivilege,
+                        EnabledStatus = dwEnable,
+                        DeviceUniqueID = dwDeviceUniqueId
+                    });
+
+                    // Mark this enrollment number as added
+                    addedEnrollNumbers.Add(dwEnrollNumber.ToString());
+
+                    Log("DEVICE", $"Added user: {dwEnrollNumber} - {actualUserName}", false, Color.Black);
                 }
             }
-            catch (Exception ex)
-            {
-                Log("ERROR", $"Unable to fetch users: {ex.Message}", true, Color.Red);
-                MessageBox.Show($"Error: {ex.Message}");
-            }
+
+            Log("DEVICE", $"✓ Successfully fetched {allUsers.Count} unique users from device.", false, Color.Green);
+            DisplayUserPage();
         }
-
-
+        else
+        {
+            Log("DEVICE", "✗ Failed to read user list from device.", true, Color.Red);
+            MessageBox.Show("Unable to fetch user list from device.");
+        }
+    }
+    catch (Exception ex)
+    {
+        Log("ERROR", $"Unable to fetch users: {ex.Message}", true, Color.Red);
+        MessageBox.Show($"Error: {ex.Message}");
+    }
+}
+        
         private void CreateSettingsTab()
         {
             Label lblTitle = new Label()
@@ -870,8 +1559,6 @@ namespace BiometricAttendanceBridge
                 lblApiStatusText.Text = "Status: Error ✗";
             }
         }
-
-
 
         private async Task DisconnectApiAsync()
         {
